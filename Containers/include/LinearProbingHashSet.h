@@ -61,7 +61,7 @@ public:
 		const uint8_t hashLow = computeHashLow(hash);
 		const uint32_t hashHigh = computeHashHigh(hash);
 		const uint32_t modMask = capacity_ - 1;
-		const size_t startIndex = hashHigh & modMask;
+		const uint32_t startIndex = hashHigh & modMask;
 
 		for (int i = startIndex;;) {
 			// data_[i] is empty and not a tombstone, return false
@@ -91,7 +91,7 @@ private:
 	static constexpr float MAX_LOAD_FACTOR = 0.8f;
 
 	size_t count_;
-	size_t capacity_;
+	uint32_t capacity_;
 	size_t exponent_;
 
 	TKey* data_;
@@ -119,7 +119,7 @@ private:
 		const uint8_t hashLow = computeHashLow(hash);
 		const uint32_t hashHigh = computeHashHigh(hash);
 		const uint32_t modMask = capacity_ - 1;
-		const size_t startIndex = hashHigh & modMask;
+		const uint32_t startIndex = hashHigh & modMask;
 
 		for (int i = startIndex;;) {
 			// data_[i] is empty - this is the spot
