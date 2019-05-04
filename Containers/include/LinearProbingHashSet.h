@@ -29,7 +29,7 @@ public:
 	//-----------------------------------------------------------------------------
 	LPHashSet()
 		: count_(0) 
-		, exponent_(4)
+		, exponent_(3)
 	{
 		capacity_ = 1 << exponent_;
 		data_ = new TKey[capacity_];
@@ -44,12 +44,13 @@ public:
 	//-----------------------------------------------------------------------------
 	void insert(const TKey& key) {
 		TKey* insertSpot = findInsertSpot(key);
+		
 		// Spot not found or the key is already present
 		if (insertSpot == nullptr)
 			return;
 
-		// put key to place
 		*insertSpot = key;
+		++count_;
 
 		if (loadFactor() > MAX_LOAD_FACTOR) {
 			rehash();
@@ -65,7 +66,7 @@ public:
 
 		for (int i = startIndex;;) {
 			// data_[i] is empty and not a tombstone, return false
-			if ((metadata_[i] & FULL_MASK) == 0 && (metadata_[i] & TOMBSTONE_MASK) == 0)
+			if ((metadata_[i] & VALID_ELEMENT_MASK) == 0 && (metadata_[i] & TOMBSTONE_MASK) == 0)
 				return false;
 			
 			// if metadata_[i] has the same hash as `hash` && data_[i] == key // return true
@@ -80,12 +81,16 @@ public:
 		return false;
 	}
 	//-----------------------------------------------------------------------------
-	size_t size() {
+	size_t count() {
 		return count_;
+	}
+	//-----------------------------------------------------------------------------
+	size_t capacity() {
+		return capacity_;
 	}
 
 private:
-	static constexpr uint32_t FULL_MASK = 1 << 7;
+	static constexpr uint32_t VALID_ELEMENT_MASK = 1 << 7;
 	static constexpr uint32_t TOMBSTONE_MASK = 1 << 6;
 	static constexpr uint32_t LOW_MASK = 0x7F; // 0b0111_1111
 	static constexpr float MAX_LOAD_FACTOR = 0.8f;
@@ -111,7 +116,27 @@ private:
 	}
 	//-----------------------------------------------------------------------------
 	void rehash() {
-		// TODO
+		++exponent_;
+		uint32_t oldCapacity = capacity_;
+		capacity_ = 1 << exponent_;
+		
+		TKey* oldData = data_;
+		uint8_t* oldMetadata = metadata_;
+
+		data_ = new TKey[capacity_];
+		metadata_ = new uint8_t[capacity_];
+		memset(metadata_, 0, capacity_);
+
+		for (size_t i = 0; i < oldCapacity; ++i) {
+			if (oldMetadata[i] & VALID_ELEMENT_MASK) {
+				// this insert may be optimized - duplicate keys do not have to be checked
+				TKey* insertSpot = findInsertSpot(oldData[i]);
+				*insertSpot = oldData[i];
+			}
+		}
+
+		delete[] oldData;
+		delete[] oldMetadata;
 	}
 	//-----------------------------------------------------------------------------
 	TKey* findInsertSpot(const TKey& key) {
@@ -123,8 +148,8 @@ private:
 
 		for (int i = startIndex;;) {
 			// data_[i] is empty - this is the spot
-			if ((metadata_[i] & FULL_MASK) == 0) {
-				metadata_[i] = hashLow | FULL_MASK;
+			if ((metadata_[i] & VALID_ELEMENT_MASK) == 0) {
+				metadata_[i] = hashLow | VALID_ELEMENT_MASK;
 				return &data_[i];
 			}
 
