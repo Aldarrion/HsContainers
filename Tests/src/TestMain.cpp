@@ -5,6 +5,8 @@
 #include <iostream>
 #include "gtest/gtest.h"
 
+#include <unordered_set>
+
 using TestedSet = hs::LPHashSet<int>;
 
 //-----------------------------------------------------------------------------
@@ -72,3 +74,14 @@ TEST(HashSetBasic, ContainsNotInserted_AfterRehash_ReturnsFalse) {
 
 	EXPECT_FALSE(set.contains(static_cast<int>(originalCapacity) + 1));
 }
+
+//-----------------------------------------------------------------------------
+TEST(HashSetBasic, Remove_ByDefault_RemovesElement) {
+	TestedSet set;
+
+	set.insert(1);
+	EXPECT_TRUE(set.contains(1));
+	set.remove(1);
+	EXPECT_FALSE(set.contains(1));
+}
+
