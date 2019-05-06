@@ -4,7 +4,7 @@
 namespace hs {
 
 //-----------------------------------------------------------------------------
-using Hash_t = uint32_t;
+using Hash_t = uint64_t;
 
 //-----------------------------------------------------------------------------
 template<class TKey>
@@ -13,12 +13,18 @@ using HashFunc_t = Hash_t(*)(const TKey&);
 //-----------------------------------------------------------------------------
 template<class TKey>
 Hash_t defaultHashFunc(const TKey&) {
-	static_assert("defaultHashFunc must be specialized");
+	static_assert(false, "defaultHashFunc must be specialized");
 }
 
 //-----------------------------------------------------------------------------
 template<>
 Hash_t defaultHashFunc<int>(const int& key) {
+	return 17 + static_cast<Hash_t>(key) * 2654435761;
+}
+
+//-----------------------------------------------------------------------------
+template<>
+Hash_t defaultHashFunc<uint32_t>(const uint32_t& key) {
 	return 17 + static_cast<Hash_t>(key) * 2654435761;
 }
 
@@ -31,7 +37,7 @@ public:
 		: count_(0) 
 		, exponent_(3)
 	{
-		capacity_ = 1 << exponent_;
+		capacity_ = static_cast<size_t>(1) << exponent_;
 		allocArrays();
 	}
 	//-----------------------------------------------------------------------------
@@ -86,25 +92,25 @@ public:
 	}
 
 private:
-	static constexpr uint32_t VALID_ELEMENT_MASK = 1 << 7;
-	static constexpr uint32_t TOMBSTONE_MASK = 1 << 6;
-	static constexpr uint32_t LOW_MASK = 0x7F; // 0b0111_1111
+	static constexpr Hash_t VALID_ELEMENT_MASK = 1 << 7;
+	static constexpr uint8_t TOMBSTONE_MASK = 1 << 6;
+	static constexpr uint8_t LOW_MASK = 0x7F; // 0b0111_1111
 	static constexpr float MAX_LOAD_FACTOR = 0.8f;
 	static constexpr size_t NPOS = -1;
 
 	size_t count_;
-	uint32_t capacity_;
+	size_t capacity_;
 	size_t exponent_;
 
 	TKey* data_;
 	uint8_t* metadata_;
 
 	//-----------------------------------------------------------------------------
-	uint32_t computeHashHigh(uint32_t hash) const {
+	Hash_t computeHashHigh(Hash_t hash) const {
 		return hash >> 8;
 	}
 	//-----------------------------------------------------------------------------
-	uint8_t computeHashLow(uint32_t hash) const {
+	uint8_t computeHashLow(Hash_t hash) const {
 		return static_cast<uint8_t>(hash & LOW_MASK);
 	}
 	//-----------------------------------------------------------------------------
@@ -120,8 +126,8 @@ private:
 	//-----------------------------------------------------------------------------
 	void rehash() {
 		++exponent_;
-		uint32_t oldCapacity = capacity_;
-		capacity_ = 1 << exponent_;
+		Hash_t oldCapacity = capacity_;
+		capacity_ = static_cast<size_t>(1) << exponent_;
 		
 		TKey* oldData = data_;
 		uint8_t* oldMetadata = metadata_;
@@ -144,11 +150,11 @@ private:
 	TKey* findInsertSpot(const TKey& key) const {
 		const Hash_t hash = hashFunc(key);
 		const uint8_t hashLow = computeHashLow(hash);
-		const uint32_t hashHigh = computeHashHigh(hash);
-		const uint32_t modMask = capacity_ - 1;
-		const uint32_t startIndex = hashHigh & modMask;
+		const Hash_t hashHigh = computeHashHigh(hash);
+		const Hash_t modMask = capacity_ - 1;
+		const Hash_t startIndex = hashHigh & modMask;
 
-		for (int i = startIndex;;) {
+		for (Hash_t i = startIndex;;) {
 			// data_[i] is empty - this is the spot
 			if ((metadata_[i] & VALID_ELEMENT_MASK) == 0) {
 				metadata_[i] = hashLow | VALID_ELEMENT_MASK;
@@ -162,19 +168,19 @@ private:
 			i = (i + 1) & modMask;
 			// Wrap around is not possible - it would mean that the table is 100% full
 		}
-
+		
 		return nullptr;
 	}
 	//-----------------------------------------------------------------------------
 	size_t indexOf(const TKey& key) const {
 		const Hash_t hash = hashFunc(key);
 		const uint8_t hashLow = computeHashLow(hash);
-		const uint32_t hashHigh = computeHashHigh(hash);
-		const uint32_t modMask = capacity_ - 1;
-		const uint32_t startIndex = hashHigh & modMask;
+		const Hash_t hashHigh = computeHashHigh(hash);
+		const Hash_t modMask = capacity_ - 1;
+		const Hash_t startIndex = hashHigh & modMask;
 
 		// iterate metadata
-		for (int i = startIndex;;) {
+		for (Hash_t i = startIndex;;) {
 			if ((metadata_[i] & VALID_ELEMENT_MASK) == 0 && (metadata_[i] & TOMBSTONE_MASK) == 0)
 				return NPOS;
 
