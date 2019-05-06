@@ -4,7 +4,7 @@ set(This HsContainers)
 
 project (${This})
 
-set(CMAKE_CONFIGURATION_TYPES "Release;Debug")
+set(CMAKE_CONFIGURATION_TYPES "Release;Debug;RelWithDebInfo")
 
 set(CMAKE_CXX_STANDARD 14)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -39,3 +39,13 @@ include(GoogleTest)
 
 enable_testing()
 gtest_discover_tests(Tests)
+
+
+# Benchmarking
+set (BENCHMARK_SOURCES
+    Benchmarks/src/BenchmarkMain.cpp
+)
+
+source_group(Benchmarks FILES ${BENCHMARK_SOURCES})
+
+add_executable(Benchmarks ${BENCHMARK_SOURCES} ${CONTAINER_HEADERS})
