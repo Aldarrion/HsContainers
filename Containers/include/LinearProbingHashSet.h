@@ -1,5 +1,7 @@
 
 #include <stdint.h>
+#include <emmintrin.h>
+#include <immintrin.h>
 
 namespace hs {
 
@@ -28,14 +30,28 @@ Hash_t defaultHashFunc<uint32_t>(const uint32_t& key) {
 	return 17 + static_cast<Hash_t>(key) * 2654435761;
 }
 
+enum class LPHashSetPolicy {
+	Simple,
+	SSE,
+	AVX
+};
+
 //-----------------------------------------------------------------------------
-template<class TKey, HashFunc_t<TKey> hashFunc = defaultHashFunc<TKey>>
+template<class TKey, LPHashSetPolicy Policy, HashFunc_t<TKey> hashFunc = defaultHashFunc<TKey>>
 class LPHashSet {
 public:
+	#define TESTING
+	#if defined(TESTING)
+		mutable uint64_t QueryCount{ 0 };
+		mutable uint64_t ElementsTested{ 0 };
+	#endif
+
 	//-----------------------------------------------------------------------------
 	LPHashSet()
 		: count_(0) 
-		, exponent_(3)
+		, exponent_(6)
+		, EMPTY_MASK_128(_mm_set1_epi8(VALID_ELEMENT_MASK | TOMBSTONE_MASK))
+		, EMPTY_MASK_256(_mm256_set1_epi8(VALID_ELEMENT_MASK | TOMBSTONE_MASK))
 	{
 		capacity_ = static_cast<size_t>(1) << exponent_;
 		allocArrays();
@@ -80,7 +96,7 @@ public:
 	}
 	//-----------------------------------------------------------------------------
 	bool contains(const TKey& key) const {
-		return indexOf(key) != NPOS;
+		return indexOfTemplate(key) != NPOS;
 	}
 	//-----------------------------------------------------------------------------
 	size_t count() const {
@@ -92,18 +108,24 @@ public:
 	}
 
 private:
-	static constexpr Hash_t VALID_ELEMENT_MASK = 1 << 7;
-	static constexpr uint8_t TOMBSTONE_MASK = 1 << 6;
-	static constexpr uint8_t LOW_MASK = 0x7F; // 0b0111_1111
+	static constexpr Hash_t VALID_ELEMENT_MASK = 1 << 7;	// 0b1000_0000
+	static constexpr uint8_t TOMBSTONE_MASK = 1 << 6;		// 0b0100_0000
+	static constexpr uint8_t LOW_MASK = 0x7F;				// 0b0111_1111
 	static constexpr float MAX_LOAD_FACTOR = 0.8f;
 	static constexpr size_t NPOS = -1;
+	const __m128i EMPTY_MASK_128; // TODO make static
+	const __m256i EMPTY_MASK_256; // TODO make static
 
 	size_t count_;
 	size_t capacity_;
 	size_t exponent_;
 
 	TKey* data_;
-	uint8_t* metadata_;
+	union {
+		uint8_t* metadata_;
+		__m128i* metadata_m128_;
+		__m256i* metadata_m256_;
+	};
 
 	//-----------------------------------------------------------------------------
 	Hash_t computeHashHigh(Hash_t hash) const {
@@ -172,6 +194,33 @@ private:
 		return nullptr;
 	}
 	//-----------------------------------------------------------------------------
+	TKey* findInsertSpotSSE(const TKey& key) const {
+		// TODO implement
+
+		const Hash_t hash = hashFunc(key);
+		const uint8_t hashLow = computeHashLow(hash);
+		const Hash_t hashHigh = computeHashHigh(hash);
+		const Hash_t modMask = capacity_ - 1;
+		const Hash_t startIndex = hashHigh & modMask;
+
+		for (Hash_t i = startIndex;;) {
+			// data_[i] is empty - this is the spot
+			if ((metadata_[i] & VALID_ELEMENT_MASK) == 0) {
+				metadata_[i] = hashLow | VALID_ELEMENT_MASK;
+				return &data_[i];
+			}
+
+			// if key already present, disallow second insertion
+			if ((metadata_[i] & LOW_MASK) == hashLow && data_[i] == key)
+				return nullptr;
+
+			i = (i + 1) & modMask;
+			// Wrap around is not possible - it would mean that the table is 100% full
+		}
+
+		return nullptr;
+	}
+	//-----------------------------------------------------------------------------
 	size_t indexOf(const TKey& key) const {
 		const Hash_t hash = hashFunc(key);
 		const uint8_t hashLow = computeHashLow(hash);
@@ -179,8 +228,15 @@ private:
 		const Hash_t modMask = capacity_ - 1;
 		const Hash_t startIndex = hashHigh & modMask;
 
+		#if defined(TESTING)
+			++QueryCount;
+		#endif
+
 		// iterate metadata
 		for (Hash_t i = startIndex;;) {
+			#if defined(TESTING)
+				++ElementsTested;
+			#endif
 			if ((metadata_[i] & VALID_ELEMENT_MASK) == 0 && (metadata_[i] & TOMBSTONE_MASK) == 0)
 				return NPOS;
 
@@ -189,10 +245,134 @@ private:
 				return i;
 
 			i = (i + 1) & modMask;
-			if (i == startIndex) // Wrapped around
+			if (i == startIndex) // Wrap around is possible if the table is full of tombstones
 				return NPOS;
 		}
 	}
+	//-----------------------------------------------------------------------------
+	size_t indexOfSSE(const TKey& key) const {
+		const Hash_t hash = hashFunc(key);
+		const uint8_t hashLow = computeHashLow(hash);
+		const Hash_t hashHigh = computeHashHigh(hash);
+		const Hash_t modMask = capacity_ - 1;
+		const Hash_t modMask128 = modMask >> 4;
+		const Hash_t startIndex = hashHigh & modMask;
+
+		const Hash_t start = startIndex >> 4;
+		const Hash_t overlap = startIndex & 15;
+
+		const __m128i elemMask = _mm_set1_epi8(hashLow | VALID_ELEMENT_MASK);
+		const __m128i emptyMask = _mm_set1_epi8(0);
+
+		#if defined(TESTING)
+			++QueryCount;
+		#endif
+
+		// iterate metadata
+		for (Hash_t i = start;;) {
+			// if metadata_[i] has the same hash as `hash` && data_[i] == key // return true
+			const __m128i eqResult = _mm_cmpeq_epi8(metadata_m128_[i], elemMask);
+			int resultMask = _mm_movemask_epi8(eqResult);
+			#if 1
+			while (true) {
+				#if defined(TESTING)
+					++ElementsTested;
+				#endif
+				unsigned long firstSet;
+				// _BitScanForward intrinsic is faster than manual bit iteration
+				const char hasAnySet = _BitScanForward(&firstSet, resultMask);
+				if (!hasAnySet)
+					break;
+				
+				// Do comparison of the value
+				const Hash_t dataIdx = (i << 4) + firstSet;
+				if (data_[dataIdx] == key)
+					return dataIdx;
+
+				// Try the next one
+				resultMask &= ~(1 << firstSet);
+			}
+			#endif
+
+			// Check if we can escape - if we found an empty spot already
+			const __m128i emptyResult = _mm_cmpeq_epi8(metadata_m128_[i], emptyMask);
+			int emptyResultMask = _mm_movemask_epi8(emptyResult);
+			unsigned long emptyFirstSet;
+			const char emptyAnySet = _BitScanForward(&emptyFirstSet, emptyResultMask);
+			if (emptyAnySet && (i != start || emptyFirstSet >= overlap))
+				return NPOS;
+
+			i = ((i + 1) & modMask128);
+			if (i == start) // Wrap around is possible if the table is full of tombstones
+				return NPOS;
+		}
+	}
+	//-----------------------------------------------------------------------------
+	size_t indexOfAVX(const TKey& key) const {
+		const Hash_t hash = hashFunc(key);
+		const uint8_t hashLow = computeHashLow(hash);
+		const Hash_t hashHigh = computeHashHigh(hash);
+		const Hash_t modMask = capacity_ - 1;
+		const Hash_t modMask256 = modMask >> 5;
+		const Hash_t startIndex = hashHigh & modMask;
+
+		// For indexing 32byte chunks
+		const Hash_t start = startIndex >> 5;
+		const Hash_t overlap = startIndex & 31;
+
+		const __m256i elemMask = _mm256_set1_epi8(hashLow | VALID_ELEMENT_MASK);
+		const __m256i emptyMask = _mm256_setzero_si256();
+
+		#if defined(TESTING)
+			++QueryCount;
+		#endif
+
+		for (Hash_t i = start;;) {
+			const __m256i eqResult = _mm256_cmpeq_epi8(metadata_m256_[i], elemMask);
+			int resultMask = _mm256_movemask_epi8(eqResult);
+			while (true) {
+				#if defined(TESTING)
+					++ElementsTested;
+				#endif
+				unsigned long firstSet;
+				const char hasAnySet = _BitScanForward(&firstSet, resultMask);
+				if (!hasAnySet)
+					break;
+
+				// Do comparison of the value
+				const Hash_t dataIdx = (i << 5) + firstSet;
+				if (data_[dataIdx] == key)
+					return dataIdx;
+
+				// Try the next one
+				resultMask &= ~(1 << firstSet);
+			}
+
+			const __m256i emptyResult = _mm256_cmpeq_epi8(metadata_m256_[i], emptyMask);
+			int emptyResultMask = _mm256_movemask_epi8(emptyResult);
+			// TODO try masking out part of result before overlap (if start == i)
+			unsigned long emptyFirstSet;
+			const char emptyAnySet = _BitScanForward(&emptyFirstSet, emptyResultMask);
+			if (emptyAnySet && (i != start || emptyFirstSet >= overlap))
+				return NPOS;
+
+			i = ((i + 1) & modMask256);
+			if (i == start) // Wrap around is possible if the table is full of tombstones
+				return NPOS;
+		}
+	}
+	//-----------------------------------------------------------------------------
+	size_t indexOfTemplate(const TKey& key) const {
+		if constexpr (Policy == LPHashSetPolicy::SSE) {
+			return indexOfSSE(key);
+		} else if constexpr (Policy == LPHashSetPolicy::AVX) {
+			return indexOfAVX(key);
+		} else {
+			return indexOf(key);
+		}
+	}
 };
+
+
 
 } // namespace hs

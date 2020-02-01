@@ -7,7 +7,7 @@
 
 #include <unordered_set>
 
-using TestedSet = hs::LPHashSet<int>;
+using TestedSet = hs::LPHashSet<int, hs::LPHashSetPolicy::SSE>;
 
 //-----------------------------------------------------------------------------
 TEST(HashSetBasic, Contains_OnInserted_ReturnsTrue) {
@@ -34,6 +34,24 @@ TEST(HashSetBasic, Contains_OnNotInserted_ReturnsFalse) {
 	const bool isFound = set.contains(2);
 
 	EXPECT_FALSE(isFound);
+}
+
+//-----------------------------------------------------------------------------
+TEST(HashSetBasic, Contains_InsertMultiple_Works) {
+	TestedSet set;
+	set.insert(1);
+	set.insert(2);
+	set.insert(3);
+	set.insert(4);
+	set.insert(5);
+
+	EXPECT_TRUE(set.contains(1));
+	EXPECT_TRUE(set.contains(2));
+	EXPECT_TRUE(set.contains(3));
+	EXPECT_TRUE(set.contains(4));
+	EXPECT_TRUE(set.contains(5));
+
+	EXPECT_FALSE(set.contains(6));
 }
 
 //-----------------------------------------------------------------------------
