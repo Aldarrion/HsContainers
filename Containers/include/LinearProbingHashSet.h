@@ -30,6 +30,12 @@ Hash_t defaultHashFunc<uint32_t>(const uint32_t& key) {
 	return 17 + static_cast<Hash_t>(key) * 2654435761;
 }
 
+struct DefaultHash {
+	size_t operator()(const uint32_t& key) const {
+		return 17 + static_cast<size_t>(key) * 2654435761;
+	}
+};
+
 enum class LPHashSetPolicy {
 	Simple,
 	SSE,
@@ -49,7 +55,7 @@ public:
 	//-----------------------------------------------------------------------------
 	LPHashSet()
 		: count_(0) 
-		, exponent_(6)
+		, exponent_(5)
 		, EMPTY_MASK_128(_mm_set1_epi8(VALID_ELEMENT_MASK | TOMBSTONE_MASK))
 		, EMPTY_MASK_256(_mm256_set1_epi8(VALID_ELEMENT_MASK | TOMBSTONE_MASK))
 	{
@@ -84,15 +90,13 @@ public:
 	}
 	//-----------------------------------------------------------------------------
 	void remove(const TKey& key) {
-		size_t idx = indexOf(key);
+		size_t idx = indexOfTemplate(key);
 		if (idx == NPOS)
 			return;
 
 		metadata_[idx] = TOMBSTONE_MASK;
 		data_[idx].~TKey();
 		--count_;
-
-		// TODO should the hashset shrink?
 	}
 	//-----------------------------------------------------------------------------
 	bool contains(const TKey& key) const {

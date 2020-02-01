@@ -31,11 +31,11 @@ template<class SetT>
 void benchInsertIntSet(uint32_t count) {
 	std::cout << "--- Insert" << std::endl;
 	Stopwatch sw{};
-    
+
 	SetT set;
-    for (uint32_t i = 0; i < count; ++i) {
-        set.insert(i);
-    }
+	for (uint32_t i = 0; i < count; ++i) {
+		set.insert(i);
+	}
 
 	sw.stop(count);
 }
@@ -67,13 +67,14 @@ void benchContainsInserted(uint32_t count) {
 	sw.stop(count);
 
 	#if defined(TESTING)
-		std::cout << "Elements per query: " << 1.0f * set.ElementsTested / set.QueryCount << std::endl;
+		if constexpr (Type != SetType::Std)
+			std::cout << "Elements per query: " << 1.0f * set.ElementsTested / set.QueryCount << std::endl;
 	#endif
 }
 
 template<class SetT, SetType Type>
 void benchContainsNotInserted(uint32_t count) {
-	std::cout << "--- Contains Inserted" << std::endl;
+	std::cout << "--- Contains Not Inserted" << std::endl;
 
 	SetT set;
 	for (uint32_t i = 0; i < count; ++i) {
@@ -98,15 +99,63 @@ void benchContainsNotInserted(uint32_t count) {
 	sw.stop(count);
 }
 
+template<class SetT, SetType Type>
+void benchRandomUsage(uint32_t count) {
+	std::cout << "--- Random Usage" << std::endl;
+
+	std::default_random_engine el(count);
+	std::uniform_int_distribution<uint32_t> dist(0, count - 1);
+
+	uint64_t found = 0;
+
+	Stopwatch sw{};
+
+	SetT set;
+	for (uint32_t i = 0; i < count; ++i) {
+		auto num = dist(el);
+		auto op = num % 4;
+		if (op == 0) {
+			set.insert(num);
+		} else if (op == 1) {
+			if constexpr (Type == SetType::Std) {
+				set.erase(num);
+			} else {
+				set.remove(num);
+			}
+		} else if (op == 2) {
+			set.insert(num);
+			if constexpr (Type == SetType::Std) {
+				set.erase(num);
+			} else {
+				set.remove(num);
+			}
+		} else {
+			if constexpr (Type == SetType::Std) {
+				if (set.find(dist(el)) != set.end()) {
+					++found;
+				}
+			} else {
+				if (set.contains(dist(el))) {
+					++found;
+				}
+			}
+		}
+	}
+
+	sw.stop(count);
+
+	std::cout << "Checksum found: " << found << std::endl;
+}
+
 std::vector<uint32_t> sizes = {
 	100,
 	#if defined (NDEBUG)
-	1000,
-	10000,
-	100000,
-	1000000,
-	10000000,
-	//100000000
+		1000,
+		10000,
+		100000,
+		1000000,
+		10000000,
+		//100000000
 	#endif
 };
 
@@ -137,29 +186,33 @@ int main() {
 	std::cout << "\nhs::LPHashset" << std::endl;
 	for (const auto size : sizes) {
 		//benchInsertIntSet<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>>(size);
-		benchContainsInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>, SetType::Hs>(size);
+		//benchContainsInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>, SetType::Hs>(size);
 		//benchContainsNotInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>, SetType::Hs>(size);
+		benchRandomUsage<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>, SetType::Hs>(size);
 	}
 
 	std::cout << "\nhs::LPHashset SSE" << std::endl;
 	for (const auto size : sizes) {
 		//benchInsertIntSet<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>>(size);
-		benchContainsInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::SSE>, SetType::Hs>(size);
+		//benchContainsInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::SSE>, SetType::Hs>(size);
 		//benchContainsNotInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::SSE>, SetType::Hs>(size);
+		benchRandomUsage<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::SSE>, SetType::Hs>(size);
 	}
 
 	std::cout << "\nhs::LPHashset AVX" << std::endl;
 	for (const auto size : sizes) {
 		//benchInsertIntSet<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::Simple>>(size);
-		benchContainsInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::AVX>, SetType::Hs>(size);
+		//benchContainsInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::AVX>, SetType::Hs>(size);
 		//benchContainsNotInserted<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::SSE>, SetType::Hs>(size);
+		benchRandomUsage<hs::LPHashSet<uint32_t, hs::LPHashSetPolicy::SSE>, SetType::Hs>(size);
 	}
 
 	std::cout << "\nstd::unordered_set" << std::endl;
 	for (const auto size : sizes) {
-		//benchInsertIntSet<std::unordered_set<uint32_t>>(size);
-		//benchContainsInserted<std::unordered_set<uint32_t>, SetType::Std>(size);
-		//benchContainsNotInserted<std::unordered_set<uint32_t>, SetType::Std>(size);
+		//benchInsertIntSet<std::unordered_set<uint32_t, hs::DefaultHash>>(size);
+		//benchContainsInserted<std::unordered_set<uint32_t, hs::DefaultHash>, SetType::Std>(size);
+		//benchContainsNotInserted<std::unordered_set<uint32_t, hs::DefaultHash>, SetType::Std>(size);
+		benchRandomUsage<std::unordered_set<uint32_t, hs::DefaultHash>, SetType::Std>(size);
 	}
 
     return 0;
