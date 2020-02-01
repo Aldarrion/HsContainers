@@ -6,7 +6,7 @@ project (${This})
 
 set(CMAKE_CONFIGURATION_TYPES "Release;Debug;RelWithDebInfo")
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 add_subdirectory(googletest)
